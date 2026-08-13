@@ -1604,20 +1604,49 @@
                     const leagueName = data1?.response?.[0]?.league?.name || 'Ла Лига';
                     const leagueCountry = data1?.response?.[0]?.league?.country || 'Испания';
 
-                    for (let i = 0; i < 8; i++) {
-                        const homeGoals = Math.floor(teams[0].strength * (2 + Math.random() * 2));
-                        const awayGoals = Math.floor(teams[1].strength * (1.5 + Math.random() * 2));
-                        defaultMatches.push({
-                            home: homeTeam,
-                            away: awayTeam,
-                            homeScore: homeGoals,
-                            awayScore: awayGoals,
-                            oz: homeGoals > 0 && awayGoals > 0,
-                            total: homeGoals + awayGoals,
-                            date: new Date(Date.now() - i * 20 * 24 * 60 * 60 * 1000).toISOString(),
-                            league: { name: leagueName, country: leagueCountry }
-                        });
-                    }
+                    for (let i = 0; i < 10; i++) {
+    // Генерируем реалистичные счета для футбола
+    let homeGoals = 0, awayGoals = 0;
+    
+    // 40% — ничьи (0:0, 1:1, 2:2)
+    if (Math.random() < 0.4) {
+        const drawScore = Math.floor(Math.random() * 3); // 0, 1 или 2
+        homeGoals = drawScore;
+        awayGoals = drawScore;
+    } else {
+        // 60% — победа одной из команд
+        const totalGoals = 1 + Math.floor(Math.random() * 4); // 1-4 гола
+        const winner = Math.random() < 0.5 ? 'home' : 'away';
+        if (winner === 'home') {
+            homeGoals = Math.max(1, Math.floor(Math.random() * 3) + 1);
+            awayGoals = Math.floor(Math.random() * 2);
+        } else {
+            awayGoals = Math.max(1, Math.floor(Math.random() * 3) + 1);
+            homeGoals = Math.floor(Math.random() * 2);
+        }
+        // Иногда разгромы (3:0, 4:1)
+        if (Math.random() < 0.15) {
+            if (Math.random() < 0.5) {
+                homeGoals += Math.floor(Math.random() * 3) + 1;
+                awayGoals = Math.floor(Math.random() * 1);
+            } else {
+                awayGoals += Math.floor(Math.random() * 3) + 1;
+                homeGoals = Math.floor(Math.random() * 1);
+            }
+        }
+    }
+    
+    defaultMatches.push({
+        home: homeTeam,
+        away: awayTeam,
+        homeScore: homeGoals,
+        awayScore: awayGoals,
+        oz: homeGoals > 0 && awayGoals > 0,
+        total: homeGoals + awayGoals,
+        date: new Date(Date.now() - i * 20 * 24 * 60 * 60 * 1000).toISOString(),
+        league: { name: leagueName, country: leagueCountry }
+    });
+}
 
                     state.h2hData = defaultMatches;
                     state.h2hTimestamp = Date.now();
@@ -5029,119 +5058,129 @@
         }
 
         async function getRealProbability(homeTeam, awayTeam, betType) {
-            try {
-                const apiKey = localStorage.getItem('quantum_api_key');
-                if (!apiKey) return 0.5;
-
-                const homeSearch = await fetchWithCache('teams?search=' + encodeURIComponent(homeTeam), {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.API_TTL);
-                const awaySearch = await fetchWithCache('teams?search=' + encodeURIComponent(awayTeam), {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.API_TTL);
-
-                if (!homeSearch?.response?.length || !awaySearch?.response?.length) return 0.5;
-
-                const homeId = homeSearch.response[0].team.id;
-                const awayId = awaySearch.response[0].team.id;
-
-                const h2hData = await fetchWithCache(
-                    'fixtures/headtohead?h2h=' + homeId + '-' + awayId + '&season=2025', { headers: { 'x-apisports-key': apiKey } },
-                    CACHE_CONFIG.API_TTL
-                );
-
-                const homeFixtures = await fetchWithCache(
-                    'fixtures?team=' + homeId + '&season=2025&last=5', { headers: { 'x-apisports-key': apiKey } },
-                    CACHE_CONFIG.API_TTL
-                );
-                const awayFixtures = await fetchWithCache(
-                    'fixtures?team=' + awayId + '&season=2025&last=5', { headers: { 'x-apisports-key': apiKey } },
-                    CACHE_CONFIG.API_TTL
-                );
-
-                let prob = 0.5;
-
-                if (h2hData?.response?.length > 0) {
-                    const totalMatches = h2hData.response.length;
-                    let overMatches = 0;
-                    let ozMatches = 0;
-                    let homeWins = 0;
-
-                    h2hData.response.forEach(m => {
-                        const hGoals = m.goals.home || 0;
-                        const aGoals = m.goals.away || 0;
-                        if (hGoals + aGoals > 2.5) overMatches++;
-                        if (hGoals > 0 && aGoals > 0) ozMatches++;
-                        if (hGoals > aGoals) homeWins++;
-                    });
-
-                    if (betType === 'total' || betType === 'total_under') {
-                        prob = overMatches / totalMatches;
-                    } else if (betType === 'oz' || betType === 'oz_no') {
-                        prob = ozMatches / totalMatches;
-                    } else if (betType === 'home_total' || betType === 'away_total') {
-                        const avgHome = h2hData.response.reduce((s, m) => s + (m.goals.home || 0),
-                            0) / totalMatches;
-                        prob = avgHome / 3;
-                    } else {
-                        prob = homeWins / totalMatches;
-                    }
-                    prob = prob * 0.3;
-                }
-
-                let homeForm = 0.5,
-                    awayForm = 0.5;
-                if (homeFixtures?.response?.length > 0) {
-                    let wins = 0;
-                    homeFixtures.response.forEach(m => {
-                        const isHome = m.teams.home.id === homeId;
-                        const scored = isHome ? m.goals.home : m.goals.away;
-                        const conceded = isHome ? m.goals.away : m.goals.home;
-                        if (scored > conceded) wins++;
-                    });
-                    homeForm = wins / homeFixtures.response.length;
-                }
-                if (awayFixtures?.response?.length > 0) {
-                    let wins = 0;
-                    awayFixtures.response.forEach(m => {
-                        const isHome = m.teams.home.id === awayId;
-                        const scored = isHome ? m.goals.home : m.goals.away;
-                        const conceded = isHome ? m.goals.away : m.goals.home;
-                        if (scored > conceded) wins++;
-                    });
-                    awayForm = wins / awayFixtures.response.length;
-                }
-
-                if (betType === 'total' || betType === 'total_under') {
-                    prob += ((homeForm + awayForm) / 2) * 0.3;
-                } else if (betType === 'oz' || betType === 'oz_no') {
-                    prob += ((homeForm + awayForm) / 2) * 0.3;
-                } else if (betType === 'home_total') {
-                    prob += homeForm * 0.3;
-                } else if (betType === 'away_total') {
-                    prob += awayForm * 0.3;
-                } else {
-                    prob += homeForm * 0.3;
-                }
-
-                let baseProb = 0.5;
-                if (betType === 'total' || betType === 'total_under') baseProb = 0.55;
-                else if (betType === 'oz' || betType === 'oz_no') baseProb = 0.50;
-                else if (betType === 'home_total' || betType === 'away_total') baseProb = 0.45;
-                else baseProb = 0.50;
-
-                prob += baseProb * 0.4;
-
-                if (betType === 'total_under') prob = 1 - prob;
-                if (betType === 'oz_no') prob = 1 - prob;
-
-                return Math.min(0.95, Math.max(0.05, prob));
-
-            } catch (error) {
-                console.error('❌ Ошибка расчета вероятности:', error);
-                return 0.5;
-            }
+    try {
+        // Очищаем названия команд от недопустимых символов
+        const cleanHome = homeTeam.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        const cleanAway = awayTeam.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        
+        if (!cleanHome || !cleanAway || cleanHome.length < 2 || cleanAway.length < 2) {
+            console.log('⚠️ Пропускаем матч: некорректные названия команд', cleanHome, cleanAway);
+            return 0.5;
         }
+
+        const apiKey = localStorage.getItem('quantum_api_key');
+        if (!apiKey) {
+            console.log('⚠️ Нет API ключа');
+            return 0.5;
+        }
+
+        const homeSearch = await fetchWithCache('teams?search=' + encodeURIComponent(cleanHome), {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+        
+        const awaySearch = await fetchWithCache('teams?search=' + encodeURIComponent(cleanAway), {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+
+        if (!homeSearch?.response?.length || !awaySearch?.response?.length) {
+            console.log('⚠️ Команды не найдены:', cleanHome, cleanAway);
+            return 0.5;
+        }
+
+        const homeId = homeSearch.response[0].team.id;
+        const awayId = awaySearch.response[0].team.id;
+
+        const h2hData = await fetchWithCache('fixtures/headtohead?h2h=' + homeId + '-' + awayId + '&season=2025', {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+
+        const homeFixtures = await fetchWithCache('fixtures?team=' + homeId + '&season=2025&last=5', {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+        
+        const awayFixtures = await fetchWithCache('fixtures?team=' + awayId + '&season=2025&last=5', {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+
+        let prob = 0.5;
+
+        if (h2hData?.response?.length > 0) {
+            const totalMatches = h2hData.response.length;
+            let overMatches = 0, ozMatches = 0, homeWins = 0;
+
+            h2hData.response.forEach(m => {
+                const hGoals = m.goals.home || 0;
+                const aGoals = m.goals.away || 0;
+                if (hGoals + aGoals > 2.5) overMatches++;
+                if (hGoals > 0 && aGoals > 0) ozMatches++;
+                if (hGoals > aGoals) homeWins++;
+            });
+
+            if (betType === 'total' || betType === 'total_under') {
+                prob = overMatches / totalMatches;
+            } else if (betType === 'oz' || betType === 'oz_no') {
+                prob = ozMatches / totalMatches;
+            } else if (betType === 'home_total' || betType === 'away_total') {
+                const avgHome = h2hData.response.reduce((s, m) => s + (m.goals.home || 0), 0) / totalMatches;
+                prob = avgHome / 3;
+            } else {
+                prob = homeWins / totalMatches;
+            }
+            prob = prob * 0.3;
+        }
+
+        let homeForm = 0.5, awayForm = 0.5;
+        if (homeFixtures?.response?.length > 0) {
+            let wins = 0;
+            homeFixtures.response.forEach(m => {
+                const isHome = m.teams.home.id === homeId;
+                const scored = isHome ? m.goals.home : m.goals.away;
+                const conceded = isHome ? m.goals.away : m.goals.home;
+                if (scored > conceded) wins++;
+            });
+            homeForm = wins / homeFixtures.response.length;
+        }
+        if (awayFixtures?.response?.length > 0) {
+            let wins = 0;
+            awayFixtures.response.forEach(m => {
+                const isHome = m.teams.home.id === awayId;
+                const scored = isHome ? m.goals.home : m.goals.away;
+                const conceded = isHome ? m.goals.away : m.goals.home;
+                if (scored > conceded) wins++;
+            });
+            awayForm = wins / awayFixtures.response.length;
+        }
+
+        if (betType === 'total' || betType === 'total_under') {
+            prob += ((homeForm + awayForm) / 2) * 0.3;
+        } else if (betType === 'oz' || betType === 'oz_no') {
+            prob += ((homeForm + awayForm) / 2) * 0.3;
+        } else if (betType === 'home_total') {
+            prob += homeForm * 0.3;
+        } else if (betType === 'away_total') {
+            prob += awayForm * 0.3;
+        } else {
+            prob += homeForm * 0.3;
+        }
+
+        let baseProb = 0.5;
+        if (betType === 'total' || betType === 'total_under') baseProb = 0.55;
+        else if (betType === 'oz' || betType === 'oz_no') baseProb = 0.50;
+        else if (betType === 'home_total' || betType === 'away_total') baseProb = 0.45;
+        else baseProb = 0.50;
+
+        prob += baseProb * 0.4;
+
+        if (betType === 'total_under') prob = 1 - prob;
+        if (betType === 'oz_no') prob = 1 - prob;
+
+        return Math.min(0.95, Math.max(0.05, prob));
+
+    } catch (error) {
+        console.error('❌ Ошибка расчета вероятности:', error);
+        return 0.5;
+    }
+}
 
         function renderScannerResults() {
             const container = document.getElementById('scannerContainer');
@@ -5695,17 +5734,17 @@
         // ================================================================
 
         function getFallbackMatches() {
-            const now = new Date();
-            return [
-                { id: 1, home: 'Спартак', away: 'Зенит', league: 'РПЛ', country: 'Россия', startTime: new Date(now.getTime() + 2 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'ОЗ - ДА', confidence: 78, odds: 1.95, total: 2.5, oz: true, isLive: false },
-                { id: 2, home: 'ЦСКА', away: 'Динамо', league: 'РПЛ', country: 'Россия', startTime: new Date(now.getTime() + 4 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Тотал > 2.5', confidence: 72, odds: 1.80, total: 2.5, oz: true, isLive: false },
-                { id: 3, home: 'Реал', away: 'Барселона', league: 'Ла Лига', country: 'Испания', startTime: new Date(now.getTime() + 6 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'ОЗ - ДА', confidence: 85, odds: 1.75, total: 2.5, oz: true, isLive: false },
-                { id: 4, home: 'Бавария', away: 'Боруссия', league: 'Бундеслига', country: 'Германия', startTime: new Date(now.getTime() + 8 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Тотал > 3.5', confidence: 82, odds: 1.90, total: 3.5, oz: true, isLive: false },
-                { id: 5, home: 'Ювентус', away: 'Милан', league: 'Серия А', country: 'Италия', startTime: new Date(now.getTime() + 10 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Фора +1.5', confidence: 68, odds: 1.85, total: 2.5, oz: false, isLive: false },
-                { id: 6, home: 'ПСЖ', away: 'Марсель', league: 'Лига 1', country: 'Франция', startTime: new Date(now.getTime() + 12 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'ОЗ - ДА', confidence: 80, odds: 1.70, total: 2.5, oz: true, isLive: false },
-                { id: 7, home: 'Славия', away: 'Спарта', league: 'Лига 1', country: 'Чехия', startTime: new Date(now.getTime() + 14 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Тотал > 2.5', confidence: 75, odds: 1.88, total: 2.5, oz: true, isLive: false }
-            ];
-        }
+    const now = new Date();
+    return [
+        { id: 1, home: 'Spartak Moscow', away: 'Zenit', league: 'RPL', country: 'Russia', startTime: new Date(now.getTime() + 2 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'ОЗ - ДА', confidence: 78, odds: 1.95, total: 2.5, oz: true, isLive: false },
+        { id: 2, home: 'CSKA Moscow', away: 'Dinamo Moscow', league: 'RPL', country: 'Russia', startTime: new Date(now.getTime() + 4 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Тотал > 2.5', confidence: 72, odds: 1.80, total: 2.5, oz: true, isLive: false },
+        { id: 3, home: 'Real Madrid', away: 'Barcelona', league: 'La Liga', country: 'Spain', startTime: new Date(now.getTime() + 6 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'ОЗ - ДА', confidence: 85, odds: 1.75, total: 2.5, oz: true, isLive: false },
+        { id: 4, home: 'Bayern Munich', away: 'Borussia Dortmund', league: 'Bundesliga', country: 'Germany', startTime: new Date(now.getTime() + 8 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Тотал > 3.5', confidence: 82, odds: 1.90, total: 3.5, oz: true, isLive: false },
+        { id: 5, home: 'Juventus', away: 'Milan', league: 'Serie A', country: 'Italy', startTime: new Date(now.getTime() + 10 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Фора +1.5', confidence: 68, odds: 1.85, total: 2.5, oz: false, isLive: false },
+        { id: 6, home: 'PSG', away: 'Marseille', league: 'Ligue 1', country: 'France', startTime: new Date(now.getTime() + 12 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'ОЗ - ДА', confidence: 80, odds: 1.70, total: 2.5, oz: true, isLive: false },
+        { id: 7, home: 'Slavia Prague', away: 'Sparta Prague', league: 'Czech Liga', country: 'Czech Republic', startTime: new Date(now.getTime() + 14 * 60 * 60 * 1000), homeScore: null, awayScore: null, status: 'upcoming', prediction: 'Тотал > 2.5', confidence: 75, odds: 1.88, total: 2.5, oz: true, isLive: false }
+    ];
+}
 
         function getMatchStatusInfo(match) {
             const now = new Date();
