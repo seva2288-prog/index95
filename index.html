@@ -4964,364 +4964,487 @@
         }
 
         // ================================================================
-        // СКАННЕР VALUE (ИСПРАВЛЕННЫЙ)
-        // ================================================================
+// СКАННЕР VALUE (ПОЛНЫЙ БЛОК)
+// ================================================================
 
-        function renderSettingsLeagues() {}
-        function renderScannerHistory() {}
+let scannerFilter = 'all';
+let scannerResults = [];
 
-        let scannerFilter = 'all';
-        let scannerResults = [];
+// ===== ФУНКЦИЯ 1: ПОИСК VALUE СТАВОК =====
+async function findValueBets() {
+    const container = document.getElementById('scannerContainer');
+    if (!container) return;
 
-        async function findValueBets() {
-            const container = document.getElementById('scannerContainer');
-            if (!container) return;
+    if (!state.predictions || state.predictions.length === 0) {
+        state.predictions = await generateTestPredictions();
+    }
 
-            // Ждем загрузки матчей
-            if (!state.predictions || state.predictions.length === 0) {
-                state.predictions = await generateTestPredictions();
-            }
+    const allMatches = state.predictions || [];
+    const matches = allMatches.filter(m => m.status !== 'finished' && m.status !== 'live');
+    
+    if (matches.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
+                🔍 Нет матчей для сканирования
+                <div style="font-size:10px;color:#555;margin-top:4px;">Добавьте матчи или обновите прогнозы</div>
+            </div>
+        `;
+        return;
+    }
 
-            const allMatches = state.predictions || [];
-            const matches = allMatches.filter(m => m.status !== 'finished' && m.status !== 'live');
-            
-            if (matches.length === 0) {
-                container.innerHTML = `
-                    <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
-                        🔍 Нет матчей для сканирования
-                        <div style="font-size:10px;color:#555;margin-top:4px;">Добавьте матчи или обновите прогнозы</div>
-                    </div>
-                `;
-                return;
-            }
+    scannerResults = [];
+    let processed = 0;
 
-            scannerResults = [];
-            let processed = 0;
+    for (const match of matches) {
+        processed++;
+        container.innerHTML = `
+            <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
+                ⏳ Сканирование матчей... ${processed}/${matches.length}
+                <div style="font-size:10px;color:#555;margin-top:4px;">${sanitizeHTML(match.home)} vs ${sanitizeHTML(match.away)}</div>
+            </div>
+        `;
 
-            for (const match of matches) {
-                processed++;
-                container.innerHTML = `
-                    <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
-                        ⏳ Сканирование матчей... ${processed}/${matches.length}
-                        <div style="font-size:10px;color:#555;margin-top:4px;">${sanitizeHTML(match.home)} vs ${sanitizeHTML(match.away)}</div>
-                    </div>
-                `;
+        // УНИКАЛЬНЫЕ типы ставок (без дублирования)
+        const totalTypes = [
+            { type: 'total_over_2_5', name: '⚽ Тотал > 2.5', odds: match.odds || 1.85 },
+            { type: 'total_under_2_5', name: '⚽ Тотал < 2.5', odds: match.odds ? match.odds * 0.9 : 1.75 },
+            { type: 'oz_yes', name: '⚽ ОЗ (Да)', odds: match.odds ? match.odds * 0.95 : 1.80 },
+            { type: 'oz_no', name: '⚽ ОЗ (Нет)', odds: match.odds ? match.odds * 0.85 : 1.70 },
+            { type: 'home_total', name: '🏠 ИТ хозяев > 1.5', odds: match.odds ? match.odds * 0.8 : 1.60 },
+            { type: 'away_total', name: '✈️ ИТ гостей > 1.5', odds: match.odds ? match.odds * 0.75 : 1.55 }
+        ];
 
-                const totalTypes = [
-                    { type: 'total', name: '⚽ Тотал > 2.5', odds: match.odds || 1.85 },
-                    { type: 'total_under', name: '⚽ Тотал < 2.5', odds: match.odds ? match.odds * 0.9 : 1.75 },
-                    { type: 'oz', name: '⚽ ОЗ (Да)', odds: match.odds ? match.odds * 0.95 : 1.80 },
-                    { type: 'oz_no', name: '⚽ ОЗ (Нет)', odds: match.odds ? match.odds * 0.85 : 1.70 },
-                    { type: 'home_total', name: '🏠 ИТ хозяев > 1.5', odds: match.odds ? match.odds * 0.8 : 1.60 },
-                    { type: 'away_total', name: '✈️ ИТ гостей > 1.5', odds: match.odds ? match.odds * 0.75 : 1.55 }
-                ];
-
-                for (const t of totalTypes) {
-                    try {
-                        const realProb = await getRealProbability(match.home, match.away, t.type);
-                        
-                        if (isNaN(realProb) || realProb < 0.01 || realProb > 0.99) continue;
-                        
-                        const realOdds = 1 / realProb;
-                        const ev = (realProb * t.odds) - 1;
-                        
-                        if (ev > 0.02) {
-                            scannerResults.push({
-                                home: match.home,
-                                away: match.away,
-                                type: t.type,
-                                name: t.name,
-                                odds: t.odds,
-                                realOdds: realOdds,
-                                realProb: Math.round(realProb * 100),
-                                ev: Math.round(ev * 100),
-                                league: match.league || 'Лига',
-                                date: match.startTime,
-                                dateStr: new Date(match.startTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
-                                timeStr: new Date(match.startTime).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-                            });
-                        }
-                    } catch (e) {
-                        console.warn('Ошибка для', match.home, 'vs', match.away, t.type);
-                    }
-                    await delay(50);
-                }
-                await delay(100);
-            }
-
-            scannerResults.sort((a, b) => b.ev - a.ev);
-            renderScannerResults();
-            updateScannerStats();
-            
-            if (scannerResults.length === 0) {
-                container.innerHTML = `
-                    <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
-                        💰 VALUE ставок не найдено
-                        <div style="font-size:10px;color:#555;margin-top:4px;">Попробуйте позже</div>
-                    </div>
-                `;
-            }
-        }
-
-        async function getRealProbability(homeTeam, awayTeam, betType) {
+        for (const t of totalTypes) {
             try {
-                const cleanHome = homeTeam.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-                const cleanAway = awayTeam.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-
-                if (!cleanHome || !cleanAway || cleanHome.length < 2 || cleanAway.length < 2) {
-                    if (state.h2hData && state.h2hData.length > 0) {
-                        return calculateProbFromH2H(state.h2hData, betType);
-                    }
-                    return 0.5;
-                }
-
-                const apiKey = localStorage.getItem('quantum_api_key');
-                if (!apiKey) {
-                    if (state.h2hData && state.h2hData.length > 0) {
-                        return calculateProbFromH2H(state.h2hData, betType);
-                    }
-                    return 0.5;
-                }
-
-                const homeSearch = await fetchWithCache('teams?search=' + encodeURIComponent(cleanHome), {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.API_TTL);
-
-                const awaySearch = await fetchWithCache('teams?search=' + encodeURIComponent(cleanAway), {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.API_TTL);
-
-                if (!homeSearch?.response?.length || !awaySearch?.response?.length) {
-                    if (state.h2hData && state.h2hData.length > 0) {
-                        return calculateProbFromH2H(state.h2hData, betType);
-                    }
-                    return 0.5;
-                }
-
-                const homeId = homeSearch.response[0].team.id;
-                const awayId = awaySearch.response[0].team.id;
-
-                const h2hData = await fetchWithCache('fixtures/headtohead?h2h=' + homeId + '-' + awayId + '&season=' + CURRENT_SEASON, {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.H2H_TTL);
-
-                let prob = 0.5;
-
-                if (h2hData?.response?.length > 0) {
-                    const totalMatches = h2hData.response.length;
-                    let overMatches = 0, ozMatches = 0, homeWins = 0;
-
-                    h2hData.response.forEach(m => {
-                        const hGoals = m.goals.home || 0;
-                        const aGoals = m.goals.away || 0;
-                        if (hGoals + aGoals > 2.5) overMatches++;
-                        if (hGoals > 0 && aGoals > 0) ozMatches++;
-                        if (hGoals > aGoals) homeWins++;
+                const realProb = await getRealProbability(match.home, match.away, t.type);
+                
+                if (isNaN(realProb) || realProb < 0.01 || realProb > 0.99) continue;
+                
+                const realOdds = 1 / realProb;
+                const ev = (realProb * t.odds) - 1;
+                
+                // Добавляем только если есть положительный EV > 5%
+                if (ev > 0.05) {
+                    scannerResults.push({
+                        home: match.home,
+                        away: match.away,
+                        type: t.type,
+                        name: t.name,
+                        odds: t.odds,
+                        realOdds: realOdds,
+                        realProb: Math.round(realProb * 100),
+                        ev: Math.round(ev * 100),
+                        league: match.league || 'Лига',
+                        date: match.startTime,
+                        dateStr: new Date(match.startTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
+                        timeStr: new Date(match.startTime).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+                        uniqueKey: match.home + '|' + match.away + '|' + t.type
                     });
-
-                    if (betType === 'total') prob = Math.min(0.85, overMatches / totalMatches + 0.15);
-                    else if (betType === 'total_under') prob = Math.min(0.85, 1 - overMatches / totalMatches + 0.15);
-                    else if (betType === 'oz') prob = Math.min(0.85, ozMatches / totalMatches + 0.15);
-                    else if (betType === 'oz_no') prob = Math.min(0.85, 1 - ozMatches / totalMatches + 0.15);
-                    else if (betType === 'home_total') {
-                        const avgHome = h2hData.response.reduce((s, m) => s + (m.goals.home || 0), 0) / totalMatches;
-                        prob = Math.min(0.8, avgHome / 3);
-                    } else if (betType === 'away_total') {
-                        const avgAway = h2hData.response.reduce((s, m) => s + (m.goals.away || 0), 0) / totalMatches;
-                        prob = Math.min(0.8, avgAway / 3);
-                    } else {
-                        prob = homeWins / totalMatches;
-                    }
                 }
-
-                if (betType === 'total_under') prob = 1 - prob;
-                if (betType === 'oz_no') prob = 1 - prob;
-
-                return Math.min(0.92, Math.max(0.08, prob));
-
-            } catch (error) {
-                console.error('❌ Ошибка:', error);
-                if (state.h2hData && state.h2hData.length > 0) {
-                    return calculateProbFromH2H(state.h2hData, betType);
-                }
-                return 0.5;
+            } catch (e) {
+                console.warn('Ошибка для', match.home, 'vs', match.away, t.type);
             }
+            await delay(50);
         }
+        await delay(100);
+    }
 
-        function calculateProbFromH2H(h2hData, betType) {
-            if (!h2hData || h2hData.length === 0) return 0.5;
-            
-            const totalMatches = h2hData.length;
-            let overMatches = 0, ozMatches = 0, homeWins = 0;
-            
-            h2hData.forEach(m => {
-                if (m.total > 2.5) overMatches++;
-                if (m.oz) ozMatches++;
-                if (m.homeScore > m.awayScore) homeWins++;
-            });
-            
-            if (betType === 'total') return Math.min(0.8, overMatches / totalMatches + 0.1);
-            if (betType === 'total_under') return Math.min(0.8, 1 - overMatches / totalMatches + 0.1);
-            if (betType === 'oz') return Math.min(0.8, ozMatches / totalMatches + 0.1);
-            if (betType === 'oz_no') return Math.min(0.8, 1 - ozMatches / totalMatches + 0.1);
-            if (betType === 'home_total') return 0.4 + (homeWins / totalMatches) * 0.3;
-            if (betType === 'away_total') return 0.4 + ((totalMatches - homeWins) / totalMatches) * 0.3;
-            
+    // Удаляем дубликаты
+    const seen = new Set();
+    scannerResults = scannerResults.filter(item => {
+        const key = item.uniqueKey;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    scannerResults.sort((a, b) => b.ev - a.ev);
+    renderScannerResults();
+    updateScannerStats();
+    
+    if (scannerResults.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
+                💰 VALUE ставок не найдено
+                <div style="font-size:10px;color:#555;margin-top:4px;">Попробуйте позже</div>
+            </div>
+        `;
+    }
+}
+
+// ===== ФУНКЦИЯ 2: РАСЧЕТ РЕАЛЬНОЙ ВЕРОЯТНОСТИ =====
+async function getRealProbability(homeTeam, awayTeam, betType) {
+    try {
+        const cleanHome = homeTeam.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        const cleanAway = awayTeam.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+
+        if (!cleanHome || !cleanAway || cleanHome.length < 2 || cleanAway.length < 2) {
+            if (state.h2hData && state.h2hData.length > 0) {
+                return calculateProbFromH2H(state.h2hData, betType);
+            }
             return 0.5;
         }
 
-        function renderScannerResults() {
-            const container = document.getElementById('scannerContainer');
-            if (!container) return;
-
-            let filtered = scannerResults;
-            if (scannerFilter === 'high') filtered = filtered.filter(r => r.ev > 20);
-            else if (scannerFilter === 'medium') filtered = filtered.filter(r => r.ev >= 10 && r.ev <= 20);
-            else if (scannerFilter === 'low') filtered = filtered.filter(r => r.ev < 10);
-
-            if (filtered.length === 0) {
-                container.innerHTML = `
-                    <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
-                        ${scannerResults.length === 0 ? '🔍 Нажмите "Найти Value ставки"' : '💰 VALUE ставок не найдено'}
-                        <div style="font-size:10px;color:#555;margin-top:4px;">
-                            ${scannerResults.length === 0 ? 'AI проанализирует все матчи' : 'Попробуйте позже'}
-                        </div>
-                    </div>
-                `;
-                return;
+        const apiKey = localStorage.getItem('quantum_api_key');
+        if (!apiKey) {
+            if (state.h2hData && state.h2hData.length > 0) {
+                return calculateProbFromH2H(state.h2hData, betType);
             }
+            return 0.5;
+        }
 
-            let html = '';
+        const homeSearch = await fetchWithCache('teams?search=' + encodeURIComponent(cleanHome), {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
 
-            const topBets = filtered.slice(0, 3);
-            const colors = ['#2ecc71', '#f1c40f', '#f39c12'];
-            const medals = ['🥇', '🥈', '🥉'];
+        const awaySearch = await fetchWithCache('teams?search=' + encodeURIComponent(cleanAway), {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+
+        if (!homeSearch?.response?.length || !awaySearch?.response?.length) {
+            if (state.h2hData && state.h2hData.length > 0) {
+                return calculateProbFromH2H(state.h2hData, betType);
+            }
+            return 0.5;
+        }
+
+        const homeId = homeSearch.response[0].team.id;
+        const awayId = awaySearch.response[0].team.id;
+
+        const h2hData = await fetchWithCache('fixtures/headtohead?h2h=' + homeId + '-' + awayId + '&season=' + CURRENT_SEASON, {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.H2H_TTL);
+
+        const homeFixtures = await fetchWithCache('fixtures?team=' + homeId + '&season=' + CURRENT_SEASON + '&last=5', {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+
+        const awayFixtures = await fetchWithCache('fixtures?team=' + awayId + '&season=' + CURRENT_SEASON + '&last=5', {
+            headers: { 'x-apisports-key': apiKey }
+        }, CACHE_CONFIG.API_TTL);
+
+        let prob = 0.5;
+
+        // 1. Анализ H2H (40% веса)
+        if (h2hData?.response?.length > 0) {
+            const totalMatches = h2hData.response.length;
+            let overMatches = 0, ozMatches = 0, homeWins = 0;
+            let totalHomeGoals = 0, totalAwayGoals = 0;
+
+            h2hData.response.forEach(m => {
+                const hGoals = m.goals.home || 0;
+                const aGoals = m.goals.away || 0;
+                totalHomeGoals += hGoals;
+                totalAwayGoals += aGoals;
+                if (hGoals + aGoals > 2.5) overMatches++;
+                if (hGoals > 0 && aGoals > 0) ozMatches++;
+                if (hGoals > aGoals) homeWins++;
+            });
+
+            const avgHomeGoals = totalHomeGoals / totalMatches;
+            const avgAwayGoals = totalAwayGoals / totalMatches;
+            const overRate = overMatches / totalMatches;
+            const ozRate = ozMatches / totalMatches;
+            const homeWinRate = homeWins / totalMatches;
+
+            // РАЗНАЯ ВЕРОЯТНОСТЬ ДЛЯ РАЗНЫХ ТИПОВ СТАВОК
+            if (betType === 'total_over_2_5') {
+                prob = Math.min(0.85, overRate + 0.15);
+            } else if (betType === 'total_under_2_5') {
+                prob = Math.min(0.85, 1 - overRate + 0.15);
+            } else if (betType === 'oz_yes') {
+                prob = Math.min(0.85, ozRate + 0.15);
+            } else if (betType === 'oz_no') {
+                prob = Math.min(0.85, 1 - ozRate + 0.15);
+            } else if (betType === 'home_total') {
+                prob = Math.min(0.8, avgHomeGoals / 3);
+            } else if (betType === 'away_total') {
+                prob = Math.min(0.8, avgAwayGoals / 3);
+            } else {
+                prob = homeWinRate;
+            }
+        }
+
+        // 2. Анализ формы команд (30% веса)
+        let homeFormScore = 0.5, awayFormScore = 0.5;
+        
+        if (homeFixtures?.response?.length > 0) {
+            let wins = 0, draws = 0, totalGoals = 0;
+            homeFixtures.response.forEach(m => {
+                const isHome = m.teams.home.id === homeId;
+                const scored = isHome ? m.goals.home : m.goals.away;
+                const conceded = isHome ? m.goals.away : m.goals.home;
+                totalGoals += scored || 0;
+                if (scored > conceded) wins++;
+                else if (scored === conceded) draws++;
+            });
+            homeFormScore = (wins + draws * 0.5) / homeFixtures.response.length;
+            const avgHomeGoalsForm = totalGoals / homeFixtures.response.length;
             
-            topBets.forEach((bet, index) => {
-                html += `
-                    <div style="background:linear-gradient(135deg,#1a3a1a,#0b0e14);border-radius:12px;padding:12px;border:2px solid ${colors[index]};margin-bottom:8px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <div style="font-size:13px;font-weight:600;color:#fff;">
-                                ${medals[index]} ${sanitizeHTML(bet.home)} vs ${sanitizeHTML(bet.away)}
-                            </div>
-                            <div style="font-size:11px;color:${colors[index]};font-weight:700;">💎 EV: +${bet.ev}%</div>
-                        </div>
-                        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:11px;color:#888;">
-                            <span style="color:#fff;">${bet.name}</span>
-                            <span style="color:#f7931a;font-weight:600;">💰 ${bet.odds.toFixed(2)}</span>
-                            <span>📊 Реальная: ${bet.realProb}%</span>
-                            <span style="color:#2ecc71;">📈 Реальный кф: ${bet.realOdds.toFixed(2)}</span>
-                        </div>
-                        <div style="margin-top:4px;font-size:10px;color:#555;">
-                            📅 ${bet.dateStr} ${bet.timeStr} · ${bet.league}
-                        </div>
-                        <div style="margin-top:6px;padding:6px 10px;background:#0b0e14;border-radius:6px;font-size:11px;color:#aaa;">
-                            💰 Реальный коэффициент: ${bet.realOdds.toFixed(2)} → БК дает: ${bet.odds.toFixed(2)}
-                        </div>
-                        <div style="margin-top:4px;font-size:11px;color:#2ecc71;font-weight:600;">
-                            ✅ VALUE! Потенциальная прибыль: +${bet.ev}%
-                        </div>
-                        <button onclick="saveValueBet(scannerResults[${index}])" style="width:100%;padding:6px;border-radius:6px;border:1px solid #2ecc71;background:transparent;color:#2ecc71;font-size:10px;cursor:pointer;margin-top:4px;min-height:30px;">
-                            💾 Сохранить в историю
-                        </button>
-                    </div>
-                `;
-            });
-
-            filtered.slice(3).forEach((bet) => {
-                const evClass = bet.ev > 20 ? 'color:#2ecc71;' : bet.ev > 10 ? 'color:#f1c40f;' : 'color:#888;';
-                html += `
-                    <div style="background:#1a1f2a;border-radius:8px;padding:8px 12px;margin-bottom:4px;border-left:3px solid ${bet.ev > 20 ? '#2ecc71' : bet.ev > 10 ? '#f1c40f' : '#888'};">
-                        <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <div style="font-size:12px;color:#fff;">${sanitizeHTML(bet.home)} vs ${sanitizeHTML(bet.away)}</div>
-                            <div style="font-size:11px;${evClass}font-weight:600;">+${bet.ev}%</div>
-                        </div>
-                        <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:10px;color:#888;margin-top:2px;">
-                            <span>${bet.name}</span>
-                            <span>💰 ${bet.odds.toFixed(2)}</span>
-                            <span>📊 ${bet.realProb}%</span>
-                            <span>📅 ${bet.dateStr}</span>
-                        </div>
-                    </div>
-                `;
-            });
-
-            container.innerHTML = html;
-        }
-
-        function updateScannerStats() {
-            const statsEl = document.getElementById('scannerStats');
-            if (!statsEl) return;
-
-            if (scannerResults.length === 0) {
-                statsEl.style.display = 'none';
-                return;
+            if (betType === 'home_total') {
+                prob = prob * 0.5 + (avgHomeGoalsForm / 3) * 0.5;
             }
-
-            statsEl.style.display = 'block';
-            document.getElementById('scannerCount').textContent = scannerResults.length;
-
-            const avgEV = scannerResults.reduce((sum, r) => sum + r.ev, 0) / scannerResults.length;
-            document.getElementById('scannerAvgEV').textContent = Math.round(avgEV) + '%';
-
-            const totalProfit = scannerResults.reduce((sum, r) => sum + r.ev, 0);
-            document.getElementById('scannerProfit').textContent = '+' + Math.round(totalProfit) + '%';
         }
-
-        function filterScanner(filter) {
-            scannerFilter = filter;
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.style.background = btn.dataset.filter === filter ? '#f7931a' : 'transparent';
-                btn.style.color = btn.dataset.filter === filter ? '#000' : '#888';
-                btn.style.borderColor = btn.dataset.filter === filter ? '#f7931a' : '#2a3140';
+        
+        if (awayFixtures?.response?.length > 0) {
+            let wins = 0, draws = 0, totalGoals = 0;
+            awayFixtures.response.forEach(m => {
+                const isHome = m.teams.home.id === awayId;
+                const scored = isHome ? m.goals.home : m.goals.away;
+                const conceded = isHome ? m.goals.away : m.goals.home;
+                totalGoals += scored || 0;
+                if (scored > conceded) wins++;
+                else if (scored === conceded) draws++;
             });
-            renderScannerResults();
-        }
-
-        function saveValueBet(bet) {
-            if (!bet) return;
-            let history = JSON.parse(localStorage.getItem('quantum_value_history') || '[]');
-            history.push({
-                date: new Date().toISOString(),
-                match: bet.home + ' vs ' + bet.away,
-                type: bet.name,
-                odds: bet.odds,
-                ev: bet.ev,
-                league: bet.league
-            });
-            localStorage.setItem('quantum_value_history', JSON.stringify(history));
-            renderScannerHistory();
-            showToast('✅ VALUE ставка сохранена!', 'success');
-        }
-
-        function renderScannerHistory() {
-            const container = document.getElementById('scannerHistory');
-            if (!container) return;
-
-            const history = JSON.parse(localStorage.getItem('quantum_value_history') || '[]');
-            if (history.length === 0) {
-                container.innerHTML = `
-                        <div style="text-align:center;color:#888;padding:10px 0;font-size:11px;">
-                            Нет сохраненных VALUE ставок
-                        </div>
-                    `;
-                return;
+            awayFormScore = (wins + draws * 0.5) / awayFixtures.response.length;
+            const avgAwayGoalsForm = totalGoals / awayFixtures.response.length;
+            
+            if (betType === 'away_total') {
+                prob = prob * 0.5 + (avgAwayGoalsForm / 3) * 0.5;
             }
-
-            const last10 = history.slice(-10).reverse();
-            container.innerHTML = last10.map(h => `
-                    <div style="background:#1a1f2a;padding:6px 10px;border-radius:6px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:11px;">
-                        <div>
-                            <span style="color:#fff;">${sanitizeHTML(h.match)}</span>
-                            <span style="color:#888;font-size:10px;">${h.type}</span>
-                        </div>
-                        <div style="display:flex;gap:8px;">
-                            <span style="color:#f7931a;">${h.odds.toFixed(2)}</span>
-                            <span style="color:#2ecc71;">+${h.ev}%</span>
-                        </div>
-                    </div>
-                `).join('');
         }
+
+        // Применяем форму для остальных типов
+        if (betType === 'total_over_2_5' || betType === 'total_under_2_5') {
+            const avgForm = (homeFormScore + awayFormScore) / 2;
+            prob = prob * 0.6 + avgForm * 0.4;
+        } else if (betType === 'oz_yes' || betType === 'oz_no') {
+            const avgForm = (homeFormScore + awayFormScore) / 2;
+            prob = prob * 0.5 + avgForm * 0.5;
+        } else if (betType === 'home_total') {
+            prob = prob * 0.6 + homeFormScore * 0.4;
+        } else if (betType === 'away_total') {
+            prob = prob * 0.6 + awayFormScore * 0.4;
+        }
+
+        // 3. Базовый вес (30%)
+        let baseProb = 0.5;
+        if (betType === 'total_over_2_5' || betType === 'total_under_2_5') baseProb = 0.50;
+        else if (betType === 'oz_yes' || betType === 'oz_no') baseProb = 0.50;
+        else if (betType === 'home_total' || betType === 'away_total') baseProb = 0.45;
+        else baseProb = 0.50;
+
+        prob = prob * 0.7 + baseProb * 0.3;
+
+        // Корректировка для UNDER и NO
+        if (betType === 'total_under_2_5') prob = 1 - prob;
+        if (betType === 'oz_no') prob = 1 - prob;
+
+        return Math.min(0.92, Math.max(0.08, prob));
+
+    } catch (error) {
+        console.error('❌ Ошибка:', error);
+        if (state.h2hData && state.h2hData.length > 0) {
+            return calculateProbFromH2H(state.h2hData, betType);
+        }
+        return 0.5;
+    }
+}
+
+// ===== ФУНКЦИЯ 3: РАСЧЕТ ВЕРОЯТНОСТИ ИЗ H2H (FALLBACK) =====
+function calculateProbFromH2H(h2hData, betType) {
+    if (!h2hData || h2hData.length === 0) return 0.5;
+    
+    const totalMatches = h2hData.length;
+    let overMatches = 0, ozMatches = 0, homeWins = 0;
+    let totalHomeGoals = 0, totalAwayGoals = 0;
+    
+    h2hData.forEach(m => {
+        totalHomeGoals += m.homeScore || 0;
+        totalAwayGoals += m.awayScore || 0;
+        if (m.total > 2.5) overMatches++;
+        if (m.oz) ozMatches++;
+        if (m.homeScore > m.awayScore) homeWins++;
+    });
+    
+    const avgHomeGoals = totalHomeGoals / totalMatches;
+    const avgAwayGoals = totalAwayGoals / totalMatches;
+    const overRate = overMatches / totalMatches;
+    const ozRate = ozMatches / totalMatches;
+    
+    if (betType === 'total_over_2_5') return Math.min(0.8, overRate + 0.1);
+    if (betType === 'total_under_2_5') return Math.min(0.8, 1 - overRate + 0.1);
+    if (betType === 'oz_yes') return Math.min(0.8, ozRate + 0.1);
+    if (betType === 'oz_no') return Math.min(0.8, 1 - ozRate + 0.1);
+    if (betType === 'home_total') return Math.min(0.8, avgHomeGoals / 3 + 0.1);
+    if (betType === 'away_total') return Math.min(0.8, avgAwayGoals / 3 + 0.1);
+    
+    return 0.5;
+}
+
+// ===== ФУНКЦИЯ 4: ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ СКАНЕРА =====
+function renderScannerResults() {
+    const container = document.getElementById('scannerContainer');
+    if (!container) return;
+
+    // Убираем дубликаты по уникальному ключу
+    const uniqueResults = [];
+    const seen = new Set();
+    scannerResults.forEach(item => {
+        const key = item.uniqueKey || item.home + '|' + item.away + '|' + item.type;
+        if (!seen.has(key)) {
+            seen.add(key);
+            uniqueResults.push(item);
+        }
+    });
+
+    let filtered = uniqueResults;
+    if (scannerFilter === 'high') filtered = filtered.filter(r => r.ev > 20);
+    else if (scannerFilter === 'medium') filtered = filtered.filter(r => r.ev >= 10 && r.ev <= 20);
+    else if (scannerFilter === 'low') filtered = filtered.filter(r => r.ev < 10);
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center;color:#888;padding:20px 0;font-size:13px;">
+                ${uniqueResults.length === 0 ? '🔍 Нажмите "Найти Value ставки"' : '💰 VALUE ставок не найдено'}
+                <div style="font-size:10px;color:#555;margin-top:4px;">
+                    ${uniqueResults.length === 0 ? 'AI проанализирует все матчи' : 'Попробуйте позже'}
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+
+    // ТОП-3 ставки
+    const topBets = filtered.slice(0, 3);
+    const colors = ['#2ecc71', '#f1c40f', '#f39c12'];
+    const medals = ['🥇', '🥈', '🥉'];
+    
+    topBets.forEach((bet, index) => {
+        html += `
+            <div style="background:linear-gradient(135deg,#1a3a1a,#0b0e14);border-radius:12px;padding:12px;border:2px solid ${colors[index]};margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="font-size:13px;font-weight:600;color:#fff;">
+                        ${medals[index]} ${sanitizeHTML(bet.home)} vs ${sanitizeHTML(bet.away)}
+                    </div>
+                    <div style="font-size:11px;color:${colors[index]};font-weight:700;">💎 EV: +${bet.ev}%</div>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;font-size:11px;color:#888;">
+                    <span style="color:#fff;">${bet.name}</span>
+                    <span style="color:#f7931a;font-weight:600;">💰 ${bet.odds.toFixed(2)}</span>
+                    <span>📊 Реальная: ${bet.realProb}%</span>
+                    <span style="color:#2ecc71;">📈 Реальный кф: ${bet.realOdds.toFixed(2)}</span>
+                </div>
+                <div style="margin-top:4px;font-size:10px;color:#555;">
+                    📅 ${bet.dateStr} ${bet.timeStr} · ${bet.league}
+                </div>
+                <div style="margin-top:6px;padding:6px 10px;background:#0b0e14;border-radius:6px;font-size:11px;color:#aaa;">
+                    💰 Реальный коэффициент: ${bet.realOdds.toFixed(2)} → БК дает: ${bet.odds.toFixed(2)}
+                </div>
+                <div style="margin-top:4px;font-size:11px;color:#2ecc71;font-weight:600;">
+                    ✅ VALUE! Потенциальная прибыль: +${bet.ev}%
+                </div>
+                <button onclick="saveValueBet(filtered[${index}])" style="width:100%;padding:6px;border-radius:6px;border:1px solid #2ecc71;background:transparent;color:#2ecc71;font-size:10px;cursor:pointer;margin-top:4px;min-height:30px;">
+                    💾 Сохранить в историю
+                </button>
+            </div>
+        `;
+    });
+
+    // Остальные ставки
+    filtered.slice(3).forEach((bet) => {
+        const evClass = bet.ev > 20 ? 'color:#2ecc71;' : bet.ev > 10 ? 'color:#f1c40f;' : 'color:#888;';
+        html += `
+            <div style="background:#1a1f2a;border-radius:8px;padding:8px 12px;margin-bottom:4px;border-left:3px solid ${bet.ev > 20 ? '#2ecc71' : bet.ev > 10 ? '#f1c40f' : '#888'};">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="font-size:12px;color:#fff;">${sanitizeHTML(bet.home)} vs ${sanitizeHTML(bet.away)}</div>
+                    <div style="font-size:11px;${evClass}font-weight:600;">+${bet.ev}%</div>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:10px;color:#888;margin-top:2px;">
+                    <span>${bet.name}</span>
+                    <span>💰 ${bet.odds.toFixed(2)}</span>
+                    <span>📊 ${bet.realProb}%</span>
+                    <span>📅 ${bet.dateStr}</span>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+// ===== ФУНКЦИЯ 5: ОБНОВЛЕНИЕ СТАТИСТИКИ СКАНЕРА =====
+function updateScannerStats() {
+    const statsEl = document.getElementById('scannerStats');
+    if (!statsEl) return;
+
+    if (scannerResults.length === 0) {
+        statsEl.style.display = 'none';
+        return;
+    }
+
+    statsEl.style.display = 'block';
+    document.getElementById('scannerCount').textContent = scannerResults.length;
+
+    const avgEV = scannerResults.reduce((sum, r) => sum + r.ev, 0) / scannerResults.length;
+    document.getElementById('scannerAvgEV').textContent = Math.round(avgEV) + '%';
+
+    const totalProfit = scannerResults.reduce((sum, r) => sum + r.ev, 0);
+    document.getElementById('scannerProfit').textContent = '+' + Math.round(totalProfit) + '%';
+}
+
+// ===== ФУНКЦИЯ 6: ФИЛЬТР СКАНЕРА =====
+function filterScanner(filter) {
+    scannerFilter = filter;
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.style.background = btn.dataset.filter === filter ? '#f7931a' : 'transparent';
+        btn.style.color = btn.dataset.filter === filter ? '#000' : '#888';
+        btn.style.borderColor = btn.dataset.filter === filter ? '#f7931a' : '#2a3140';
+    });
+    renderScannerResults();
+}
+
+// ===== ФУНКЦИЯ 7: СОХРАНЕНИЕ VALUE СТАВКИ =====
+function saveValueBet(bet) {
+    if (!bet) return;
+    let history = JSON.parse(localStorage.getItem('quantum_value_history') || '[]');
+    history.push({
+        date: new Date().toISOString(),
+        match: bet.home + ' vs ' + bet.away,
+        type: bet.name,
+        odds: bet.odds,
+        ev: bet.ev,
+        league: bet.league
+    });
+    localStorage.setItem('quantum_value_history', JSON.stringify(history));
+    renderScannerHistory();
+    showToast('✅ VALUE ставка сохранена!', 'success');
+}
+
+// ===== ФУНКЦИЯ 8: ИСТОРИЯ VALUE СТАВОК =====
+function renderScannerHistory() {
+    const container = document.getElementById('scannerHistory');
+    if (!container) return;
+
+    const history = JSON.parse(localStorage.getItem('quantum_value_history') || '[]');
+    if (history.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center;color:#888;padding:10px 0;font-size:11px;">
+                Нет сохраненных VALUE ставок
+            </div>
+        `;
+        return;
+    }
+
+    const last10 = history.slice(-10).reverse();
+    container.innerHTML = last10.map(h => `
+        <div style="background:#1a1f2a;padding:6px 10px;border-radius:6px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:11px;">
+            <div>
+                <span style="color:#fff;">${sanitizeHTML(h.match)}</span>
+                <span style="color:#888;font-size:10px;">${h.type}</span>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <span style="color:#f7931a;">${h.odds.toFixed(2)}</span>
+                <span style="color:#2ecc71;">+${h.ev}%</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ===== ФУНКЦИЯ 9: ПУСТАЯ ФУНКЦИЯ (ЗАГЛУШКА) =====
+function renderSettingsLeagues() {}
 
         // ================================================================
         // КЛАСС QUANTUM ASSISTANT (AI МОДЕЛЬ)
