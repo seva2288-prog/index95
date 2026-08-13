@@ -1445,147 +1445,81 @@
             return { name: 'Лига', oz: 60, avgGoals: 2.6, country: 'Мир' };
         }
 
-        async function loadH2H() {
-            const homeTeamInput = $('homeTeamH2H');
-            const awayTeamInput = $('awayTeamH2H');
-            if (!homeTeamInput || !awayTeamInput) return;
-            const homeTeam = homeTeamInput.value?.trim() || '';
-            const awayTeam = awayTeamInput.value?.trim() || '';
-            if (!homeTeam || !awayTeam) { showToast('⚠️ Введите обе команды!', 'error'); return; }
+        for (let i = 0; i < 10; i++) {
+    // Реалистичные счета для футбола
+    let homeGoals, awayGoals;
+    
+    // Случайным образом выбираем тип счета
+    const matchType = Math.random();
+    
+    if (matchType < 0.15) {
+        // 15% — сухие матчи (0:0, 1:0, 0:1)
+        homeGoals = Math.floor(Math.random() * 2);
+        awayGoals = Math.floor(Math.random() * 1);
+        if (Math.random() > 0.5) {
+            // Меняем местами, чтобы было разнообразие
+            const temp = homeGoals;
+            homeGoals = awayGoals;
+            awayGoals = temp;
+        }
+    } else if (matchType < 0.40) {
+        // 25% — ничьи (1:1, 2:2, 0:0)
+        const drawScore = Math.floor(Math.random() * 3); // 0, 1 или 2
+        homeGoals = drawScore;
+        awayGoals = drawScore;
+    } else if (matchType < 0.75) {
+        // 35% — обычные матчи (1:0, 2:1, 2:0, 3:1)
+        homeGoals = 1 + Math.floor(Math.random() * 3);
+        awayGoals = Math.floor(Math.random() * 2);
+        if (Math.random() > 0.5) {
+            const temp = homeGoals;
+            homeGoals = awayGoals;
+            awayGoals = temp;
+        }
+    } else {
+        // 25% — голевые матчи (2:2, 3:2, 3:3, 4:2)
+        homeGoals = 2 + Math.floor(Math.random() * 3);
+        awayGoals = 1 + Math.floor(Math.random() * 3);
+        if (Math.random() > 0.5) {
+            const temp = homeGoals;
+            homeGoals = awayGoals;
+            awayGoals = temp;
+        }
+    }
+    
+    // Добавляем случайности к уже сгенерированным счетам
+    if (Math.random() > 0.7) {
+        homeGoals += Math.floor(Math.random() * 2);
+    }
+    if (Math.random() > 0.7) {
+        awayGoals += Math.floor(Math.random() * 2);
+    }
+    
+    // Ограничиваем счета разумными пределами
+    homeGoals = Math.min(5, homeGoals);
+    awayGoals = Math.min(5, awayGoals);
+    
+    // Убедимся, что счета не отрицательные
+    homeGoals = Math.max(0, homeGoals);
+    awayGoals = Math.max(0, awayGoals);
+    
+    // Если оба нуля — делаем хотя бы 1:1
+    if (homeGoals === 0 && awayGoals === 0 && Math.random() > 0.3) {
+        homeGoals = 1;
+        awayGoals = 1;
+    }
 
-            const cacheKey = 'h2h_' + homeTeam + '_' + awayTeam;
-            const cached = localStorage.getItem(cacheKey);
-            if (cached) {
-                try {
-                    const data = JSON.parse(cached);
-                    if (Date.now() - data.timestamp < CACHE_CONFIG.H2H_TTL) {
-                        state.h2hData = data.matches;
-                        state.h2hTimestamp = data.timestamp;
-                        renderH2HData(data.matches);
-                        showToast('✅ Из кэша (' + data.matches.length + ' матчей)', 'success');
-                        return;
-                    }
-                } catch (e) {}
-            }
-
-            if (state.isLoading) return;
-            state.isLoading = true;
-            const btn = $('loadH2HBtn');
-            const btnText = $('loadBtnText');
-            const spinner = $('loadSpinner');
-            const status = $('h2hStatus');
-            const results = $('h2hResults');
-            const dataStatus = $('h2hDataStatus');
-            if (btn) btn.disabled = true;
-            if (btnText) btnText.textContent = '⏳ Загрузка...';
-            if (spinner) spinner.style.display = 'inline-block';
-            if (status) status.innerHTML = '⏳ Получение статистики команд...';
-            if (results) results.innerHTML = '';
-            if (dataStatus) dataStatus.textContent = '';
-
-            try {
-                const apiKey = localStorage.getItem('quantum_api_key');
-                if (!apiKey || apiKey === '') {
-                    throw new Error('Введите API ключ в настройках');
-                }
-
-                const data1 = await fetchWithCache('teams?search=' + encodeURIComponent(homeTeam), {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.API_TTL);
-                if (!data1 || !data1.response || data1.response.length === 0) {
-                    if (status) status.innerHTML = '❌ Команда "' + sanitizeHTML(homeTeam) + '" не найдена';
-                    state.isLoading = false;
-                    resetButtons(btn, btnText, spinner);
-                    return;
-                }
-                const homeId = data1.response[0].team.id;
-
-                const data2 = await fetchWithCache('teams?search=' + encodeURIComponent(awayTeam), {
-                    headers: { 'x-apisports-key': apiKey }
-                }, CACHE_CONFIG.API_TTL);
-                if (!data2 || !data2.response || data2.response.length === 0) {
-                    if (status) status.innerHTML = '❌ Команда "' + sanitizeHTML(awayTeam) + '" не найдена';
-                    state.isLoading = false;
-                    resetButtons(btn, btnText, spinner);
-                    return;
-                }
-                const awayId = data2.response[0].team.id;
-
-                if (status) status.innerHTML = '⏳ Анализ статистики команд...';
-
-                const seasons = [2025, 2024, 2023];
-                const homeStats = [];
-                const awayStats = [];
-                const allMatches = [];
-
-                for (const season of seasons) {
-                    const homeData = await fetchWithCache(
-                        'teams/statistics?team=' + homeId + '&league=39&season=' + season, { headers: { 'x-apisports-key': apiKey } },
-                        CACHE_CONFIG.API_TTL
-                    );
-                    if (homeData?.response) {
-                        const stats = homeData.response;
-                        const avgHomeGoals = stats.goals?.total?.total / stats.fixtures?.total || 2.5;
-                        homeStats.push({ season, avgGoals: avgHomeGoals, matches: stats.fixtures?.total || 0 });
-                    }
-
-                    const awayData = await fetchWithCache(
-                        'teams/statistics?team=' + awayId + '&league=39&season=' + season, { headers: { 'x-apisports-key': apiKey } },
-                        CACHE_CONFIG.API_TTL
-                    );
-                    if (awayData?.response) {
-                        const stats = awayData.response;
-                        const avgAwayGoals = stats.goals?.total?.total / stats.fixtures?.total || 2.0;
-                        awayStats.push({ season, avgGoals: avgAwayGoals, matches: stats.fixtures?.total || 0 });
-                    }
-                    await delay(200);
-                }
-
-                if (homeStats.length > 0 && awayStats.length > 0) {
-                    const avgHome = homeStats.reduce((s, h) => s + h.avgGoals, 0) / homeStats.length;
-                    const avgAway = awayStats.reduce((s, a) => s + a.avgGoals, 0) / awayStats.length;
-
-                    for (let i = 0; i < 10; i++) {
-                        const homeVar = (Math.random() - 0.5) * 3.0;
-                        const awayVar = (Math.random() - 0.5) * 2.5;
-
-                        let homeGoals = Math.max(0, Math.round(avgHome + homeVar));
-                        let awayGoals = Math.max(0, Math.round(avgAway + awayVar));
-
-                        if (Math.random() > 0.8) {
-                            homeGoals = Math.floor(Math.random() * 2);
-                            awayGoals = Math.floor(Math.random() * 2);
-                        }
-                        if (Math.random() > 0.85) {
-                            homeGoals += Math.floor(Math.random() * 3) + 2;
-                            awayGoals += Math.floor(Math.random() * 3) + 1;
-                        }
-                        if (Math.random() > 0.9) {
-                            if (Math.random() > 0.5) {
-                                homeGoals += Math.floor(Math.random() * 3) + 2;
-                                awayGoals = Math.floor(Math.random() * 1);
-                            } else {
-                                awayGoals += Math.floor(Math.random() * 3) + 2;
-                                homeGoals = Math.floor(Math.random() * 1);
-                            }
-                        }
-                        if (Math.random() > 0.85) {
-                            const drawScore = Math.floor(Math.random() * 3) + 1;
-                            homeGoals = drawScore;
-                            awayGoals = drawScore;
-                        }
-
-                        allMatches.push({
-                            home: homeTeam,
-                            away: awayTeam,
-                            homeScore: homeGoals,
-                            awayScore: awayGoals,
-                            oz: homeGoals > 0 && awayGoals > 0,
-                            total: homeGoals + awayGoals,
-                            date: new Date(Date.now() - i * 14 * 24 * 60 * 60 * 1000).toISOString(),
-                            league: { name: data1.response[0]?.league?.name || 'Ла Лига', country: data1.response[0]?.league?.country || 'Испания' }
-                        });
-                    }
+    allMatches.push({
+        home: homeTeam,
+        away: awayTeam,
+        homeScore: homeGoals,
+        awayScore: awayGoals,
+        oz: homeGoals > 0 && awayGoals > 0,
+        total: homeGoals + awayGoals,
+        date: new Date(Date.now() - i * 14 * 24 * 60 * 60 * 1000).toISOString(),
+        league: { name: data1.response[0]?.league?.name || 'Ла Лига', country: data1.response[0]?.league?.country || 'Испания' }
+    });
+}
 
                     state.h2hData = allMatches;
                     state.h2hTimestamp = Date.now();
