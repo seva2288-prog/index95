@@ -1224,8 +1224,8 @@
         };
         let LEAGUES=JSON.parse(localStorage.getItem('quantum_leagues')||'{}');
 
-        // ================================================================
-// API, H2H, ЛИГИ, ПОГОДА (ИСПРАВЛЕННЫЙ БЛОК v7.0)
+// ================================================================
+// API, H2H, ЛИГИ, ПОГОДА (ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ БЛОК)
 // ================================================================
 
 async function fetchWithCache(url, options = {}, ttl = CACHE_CONFIG.API_TTL) {
@@ -1287,7 +1287,7 @@ function getLeagueInfo(leagueId) {
     return LEAGUE_INFO[leagueId] || { name: 'Лига ' + leagueId, country: 'Мир', flag: '🌍', level: 1 };
 }
 
-// ===== ОТОБРАЖЕНИЕ ВСЕХ ЛИГ В ФИЛЬТРЕ (ИСПРАВЛЕННАЯ) =====
+// ===== ОТОБРАЖЕНИЕ ВСЕХ ЛИГ В ФИЛЬТРЕ =====
 function renderAllLeagues() {
     const select = document.getElementById('filterLeague');
     if (!select) return;
@@ -1320,7 +1320,7 @@ function renderAllLeagues() {
     }
 }
 
-// ===== ЗАГРУЗКА ВСЕХ ЛИГ (ИСПРАВЛЕННАЯ v2) =====
+// ===== ЗАГРУЗКА ВСЕХ ЛИГ =====
 async function loadAllLeaguesExtended() {
     const apiKey = localStorage.getItem('quantum_api_key');
     if (!apiKey || apiKey === '') {
@@ -1349,7 +1349,7 @@ async function loadAllLeaguesExtended() {
         }
         
         try {
-            // ===== ИСПРАВЛЕНО: используем fixtures вместо fixtures/statistics =====
+            // ===== ИСПРАВЛЕНО: используем правильный эндпоинт =====
             const fixturesData = await fetchWithCache(
                 'fixtures?league=' + leagueId + '&season=' + CURRENT_SEASON,
                 { headers: { 'x-apisports-key': apiKey } },
@@ -1368,8 +1368,6 @@ async function loadAllLeaguesExtended() {
                 const fixtures = fixturesData.response;
                 matchesCount = fixtures.length;
                 
-                let homeWins = 0, awayWins = 0, draws = 0;
-                
                 fixtures.forEach(m => {
                     const homeGoals = m.goals?.home || 0;
                     const awayGoals = m.goals?.away || 0;
@@ -1377,9 +1375,6 @@ async function loadAllLeaguesExtended() {
                     if (m.fixture?.status?.short === 'FT' || m.fixture?.status?.short === 'AET') {
                         totalGoals += homeGoals + awayGoals;
                         if (homeGoals > 0 && awayGoals > 0) ozMatches++;
-                        if (homeGoals > awayGoals) homeWins++;
-                        else if (awayGoals > homeGoals) awayWins++;
-                        else draws++;
                     }
                 });
                 
@@ -1392,7 +1387,6 @@ async function loadAllLeaguesExtended() {
                     ozPercent = Math.round((ozMatches / completedMatches) * 100);
                 }
                 
-                // Если данных все еще мало, используем приблизительные значения
                 if (completedMatches < 5) {
                     if (info.level >= 4) {
                         avgGoals = 2.6;
@@ -1407,7 +1401,6 @@ async function loadAllLeaguesExtended() {
                     matchesCount = completedMatches || 20;
                 }
             } else {
-                // Если нет данных, используем значения по умолчанию
                 if (info.level >= 4) {
                     avgGoals = 2.6;
                     ozPercent = 58;
@@ -1467,13 +1460,72 @@ async function loadAllLeaguesExtended() {
     showToast('✅ Загружено ' + loadedCount + ' лиг!', 'success');
 }
 
+function renderLeagues() {
+    const select = $('leagueSelect');
+    if (!select) return;
+    select.innerHTML = '';
+    if (Object.keys(LEAGUES).length === 0) {
+        const option = document.createElement('option');
+        option.value = '39';
+        option.textContent = '🏴 АПЛ (загрузка...)';
+        select.appendChild(option);
+        return;
+    }
+    const sorted = Object.keys(LEAGUES).sort((a, b) => LEAGUES[a].name.localeCompare(LEAGUES[b].name));
+    sorted.forEach(key => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = LEAGUES[key].name;
+        if (key === state.currentLeague) option.selected = true;
+        select.appendChild(option);
+    });
+}
+
+function updateLeagueInfo() {
+    const league = getLeague();
+    const info = $('leagueInfo');
+    if (info && league.avgGoals) {
+        info.textContent = 'Ср. тотал: ' + league.avgGoals + ' | ОЗ: ' + league.oz + '% | ' + Object.keys(LEAGUES)
+            .length + ' лиг';
+    }
+}
+
+// ===== ОТОБРАЖЕНИЕ ИНФОРМАЦИИ О ЛИГЕ (ИСПРАВЛЕННАЯ) =====
+function updateLeagueInfoDisplay(leagueData) {
+    const card = document.getElementById('leagueInfoCard');
+    if (!card) return;
+    if (!leagueData) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+    document.getElementById('leagueNameDisplay').textContent = leagueData.name || '🏆 Лига';
+    document.getElementById('leagueCountry').textContent = leagueData.country || '--';
+    document.getElementById('leagueSeason').textContent = leagueData.season || '--';
+    document.getElementById('leagueAvgGoals').textContent = leagueData.avgGoals || '--';
+    document.getElementById('leagueOz').textContent = (leagueData.oz || 0) + '%';
+    document.getElementById('leagueMatches').textContent = leagueData.matches || '--';
+    
+    const statusEl = document.getElementById('leagueDataStatus');
+    if (statusEl) {
+        if (leagueData.timestamp) {
+            const status = getDataStatus(leagueData.timestamp, CACHE_CONFIG.LEAGUES_TTL, leagueData.matches);
+            statusEl.textContent = status.text;
+            statusEl.style.color = status.color;
+        } else {
+            statusEl.textContent = '📊 Данные загружены';
+            statusEl.style.color = '#888';
+        }
+    }
+}
+
 // ===== ПОЛУЧЕНИЕ ДАННЫХ О ЛИГЕ (ИСПРАВЛЕННАЯ) =====
 function getLeague() {
     if (state.currentLeagueData && state.currentLeagueData.name) {
         return state.currentLeagueData;
     }
     
-    if (LEAGUES[state.currentLeague]) {
+    if (LEAGUES && LEAGUES[state.currentLeague]) {
         return LEAGUES[state.currentLeague];
     }
     
