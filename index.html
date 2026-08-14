@@ -1320,7 +1320,7 @@ function renderAllLeagues() {
     }
 }
 
-// ===== ЗАГРУЗКА ВСЕХ ЛИГ (ИСПРАВЛЕННАЯ) =====
+// ===== ЗАГРУЗКА ВСЕХ ЛИГ (ИСПРАВЛЕННАЯ v2) =====
 async function loadAllLeaguesExtended() {
     const apiKey = localStorage.getItem('quantum_api_key');
     if (!apiKey || apiKey === '') {
@@ -1349,9 +1349,9 @@ async function loadAllLeaguesExtended() {
         }
         
         try {
-            // ===== ИСПРАВЛЕНО: используем правильный эндпоинт fixtures/statistics =====
-            const fixturesStats = await fetchWithCache(
-                'fixtures/statistics?league=' + leagueId + '&season=' + CURRENT_SEASON,
+            // ===== ИСПРАВЛЕНО: используем fixtures вместо fixtures/statistics =====
+            const fixturesData = await fetchWithCache(
+                'fixtures?league=' + leagueId + '&season=' + CURRENT_SEASON,
                 { headers: { 'x-apisports-key': apiKey } },
                 CACHE_CONFIG.LEAGUES_TTL
             );
@@ -1363,27 +1363,51 @@ async function loadAllLeaguesExtended() {
             let totalGoals = 0;
             let ozMatches = 0;
             
-            // Анализируем статистику фикстур
-            if (fixturesStats && fixturesStats.response) {
-                const stats = fixturesStats.response;
+            // Анализируем данные фикстур
+            if (fixturesData && fixturesData.response && fixturesData.response.length > 0) {
+                const fixtures = fixturesData.response;
+                matchesCount = fixtures.length;
                 
-                if (stats.fixtures && stats.fixtures.total) {
-                    matchesCount = stats.fixtures.total;
+                let homeWins = 0, awayWins = 0, draws = 0;
+                
+                fixtures.forEach(m => {
+                    const homeGoals = m.goals?.home || 0;
+                    const awayGoals = m.goals?.away || 0;
+                    
+                    if (m.fixture?.status?.short === 'FT' || m.fixture?.status?.short === 'AET') {
+                        totalGoals += homeGoals + awayGoals;
+                        if (homeGoals > 0 && awayGoals > 0) ozMatches++;
+                        if (homeGoals > awayGoals) homeWins++;
+                        else if (awayGoals > homeGoals) awayWins++;
+                        else draws++;
+                    }
+                });
+                
+                const completedMatches = fixtures.filter(m => 
+                    m.fixture?.status?.short === 'FT' || m.fixture?.status?.short === 'AET'
+                ).length;
+                
+                if (completedMatches > 0) {
+                    avgGoals = parseFloat((totalGoals / completedMatches).toFixed(2));
+                    ozPercent = Math.round((ozMatches / completedMatches) * 100);
                 }
                 
-                if (stats.goals && stats.goals.total) {
-                    totalGoals = stats.goals.total.total || 0;
-                    avgGoals = matchesCount > 0 ? parseFloat((totalGoals / matchesCount).toFixed(2)) : 2.5;
+                // Если данных все еще мало, используем приблизительные значения
+                if (completedMatches < 5) {
+                    if (info.level >= 4) {
+                        avgGoals = 2.6;
+                        ozPercent = 58;
+                    } else if (info.level >= 3) {
+                        avgGoals = 2.4;
+                        ozPercent = 52;
+                    } else {
+                        avgGoals = 2.3;
+                        ozPercent = 48;
+                    }
+                    matchesCount = completedMatches || 20;
                 }
-                
-                if (stats.goals && stats.goals.both) {
-                    const bothTotal = stats.goals.both.total || 0;
-                    ozPercent = matchesCount > 0 ? Math.round((bothTotal / matchesCount) * 100) : 55;
-                }
-            }
-            
-            // Если данных мало, используем приблизительные значения
-            if (matchesCount < 10) {
+            } else {
+                // Если нет данных, используем значения по умолчанию
                 if (info.level >= 4) {
                     avgGoals = 2.6;
                     ozPercent = 58;
@@ -1420,7 +1444,6 @@ async function loadAllLeaguesExtended() {
         } catch (e) {
             console.log('⚠️ Ошибка с лигой ' + leagueId + ':', e.message);
             
-            // Используем значения по умолчанию при ошибке
             const info = getLeagueInfo(leagueId);
             leagueStats[leagueId] = {
                 name: info.flag + ' ' + info.name,
@@ -1442,63 +1465,6 @@ async function loadAllLeaguesExtended() {
     renderAllLeagues();
     updateLeagueInfoDisplay();
     showToast('✅ Загружено ' + loadedCount + ' лиг!', 'success');
-}
-
-function renderLeagues() {
-    const select = $('leagueSelect');
-    if (!select) return;
-    select.innerHTML = '';
-    if (Object.keys(LEAGUES).length === 0) {
-        const option = document.createElement('option');
-        option.value = '39';
-        option.textContent = '🏴 АПЛ (загрузка...)';
-        select.appendChild(option);
-        return;
-    }
-    const sorted = Object.keys(LEAGUES).sort((a, b) => LEAGUES[a].name.localeCompare(LEAGUES[b].name));
-    sorted.forEach(key => {
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = LEAGUES[key].name;
-        if (key === state.currentLeague) option.selected = true;
-        select.appendChild(option);
-    });
-}
-
-function updateLeagueInfo() {
-    const league = getLeague();
-    const info = $('leagueInfo');
-    if (info && league.avgGoals) {
-        info.textContent = 'Ср. тотал: ' + league.avgGoals + ' | ОЗ: ' + league.oz + '% | ' + Object.keys(LEAGUES)
-            .length + ' лиг';
-    }
-}
-
-function updateLeagueInfoDisplay(leagueData) {
-    const card = document.getElementById('leagueInfoCard');
-    if (!card) return;
-    if (!leagueData) {
-        card.style.display = 'none';
-        return;
-    }
-    card.style.display = 'block';
-    document.getElementById('leagueNameDisplay').textContent = leagueData.name || '🏆 Лига';
-    document.getElementById('leagueCountry').textContent = leagueData.country || '--';
-    document.getElementById('leagueSeason').textContent = leagueData.season || '--';
-    document.getElementById('leagueAvgGoals').textContent = leagueData.avgGoals || '--';
-    document.getElementById('leagueOz').textContent = (leagueData.oz || 0) + '%';
-    document.getElementById('leagueMatches').textContent = leagueData.matches || '--';
-    const statusEl = document.getElementById('leagueDataStatus');
-    if (statusEl) {
-        if (leagueData.timestamp) {
-            const status = getDataStatus(leagueData.timestamp, CACHE_CONFIG.LEAGUES_TTL, leagueData.matches);
-            statusEl.textContent = status.text;
-            statusEl.style.color = status.color;
-        } else {
-            statusEl.textContent = '📊 Данные загружены';
-            statusEl.style.color = '#888';
-        }
-    }
 }
 
 // ===== ПОЛУЧЕНИЕ ДАННЫХ О ЛИГЕ (ИСПРАВЛЕННАЯ) =====
